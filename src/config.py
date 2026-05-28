@@ -3,15 +3,17 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
+
     APP_NAME: str = "RideDelivery API"
     APP_ENV: str = "development"
     DEBUG: bool = True
-    SECRET_KEY: str = "change-me-in-production"
+
+    SECRET_KEY: str 
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/ridedelivery"
-    DATABASE_URL_SYNC: str = "postgresql://postgres:password@localhost:5432/ridedelivery"
+    DATABASE_URL: str  
+    DATABASE_URL_SYNC: str 
 
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
