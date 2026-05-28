@@ -1,0 +1,10 @@
+# ignore venv 
+venv/
+# ignore pycache
+__pycache__/
+# ignore .env file
+.env
+# ignore .vscode settings
+.vscode/
+# ignore .idea settings
+.idea/
