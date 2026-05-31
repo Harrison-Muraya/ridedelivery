@@ -17,7 +17,7 @@ from src.models.enums import (
 )
 from src.schemas.requests import AssignmentResponseRequest, AssignmentOut, RequestOut
 from src.schemas.rating import CreateRatingRequest, RatingOut
-from src.schemas.userProfile import RiderAvailabilityRequest, LocationUpdate, ProfileOut, UpdateProfileRequest
+from src.schemas.user import RiderAvailabilityRequest, LocationUpdate, ProfileOut, UpdateProfileRequest
 from src.schemas.notifications import NotificationOut
 
 router = APIRouter(prefix="/rider", tags=["Rider"])

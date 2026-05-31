@@ -21,7 +21,7 @@ from src.schemas.rating import CreateRatingRequest, RatingOut
 from src.schemas.billing import BillingOut
 from src.schemas.payments import InitiatePaymentRequest, TransactionOut
 from src.schemas.notifications import NotificationOut
-from src.schemas.userProfile import UpdateProfileRequest, ProfileOut, LocationUpdate, RiderAvailabilityRequest
+from src.schemas.user import UpdateProfileRequest, ProfileOut, LocationUpdate, RiderAvailabilityRequest
 from src.services.distance import haversine_km, estimate_minutes
 from src.services.fare import calculate_fare
 from src.services import mpesa as mpesa_service

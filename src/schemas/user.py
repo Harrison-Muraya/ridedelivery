@@ -1,9 +1,10 @@
 from pydantic import BaseModel, EmailStr, field_validator, ConfigDict, model_validator
-from typing import Optional
+from typing import Optional, List
 from decimal import Decimal
 from datetime import datetime
 from uuid import UUID 
 from src.models.enums import UserRole
+
 
 
 class UserCreate(BaseModel):
@@ -57,6 +58,7 @@ class UserResponse(BaseModel):
     is_verified: bool
     created_at: datetime
     profile: Optional[ProfileOut] = None
+    roles: List[str] = [] 
     
 
     @model_validator(mode="before")
@@ -86,6 +88,7 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: Optional[str] = None
     vehicle_type: Optional[str] = None
     vehicle_plate: Optional[str] = None
+    national_id: Optional[str] = None
 
 
 class RiderAvailabilityRequest(BaseModel):

@@ -17,7 +17,7 @@ from src.models.enums import (
 )
 from src.schemas.admin import UpdatePricingRequest, AdminAssignRiderRequest, PricingConfigOut
 from src.schemas.requests import RequestOut, AssignmentOut
-from src.schemas.userProfile import UserOut
+from src.schemas.user import UserResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -156,13 +156,13 @@ async def list_escalated(
 
 # ─── Users & Riders ───────────────────────────────────────────────────────────
 
-@router.get("/users", response_model=List[UserOut])
+@router.get("/users", response_model=List[UserResponse])
 async def list_users(
     role: str = None,
     current_user: User = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(User).options(selectinload(User.profile))
+    stmt = select(User).options(selectinload(User.profile), selectinload(User.roles),)
     if role:
         stmt = stmt.join(UserRoleMap).where(UserRoleMap.role == role)
     result = await db.execute(stmt.limit(100))
