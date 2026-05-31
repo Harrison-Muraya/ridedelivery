@@ -1,15 +1,15 @@
-# fastapi
-# uvicorn[standard]
-# sqlalchemy
-# asyncpg
-# psycopg2-binary
-# alembic 
-# pydantic
-# pydantic-settings
-# pydantic[email]
-# python-jose[cryptography]
-# passlib[bcrypt]
-# httpx
-# celery[redis]
-# redis
-# python-multipart
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+psycopg2-binary
+alembic 
+pydantic
+pydantic-settings
+pydantic[email]
+python-jose[cryptography]
+passlib[bcrypt]
+httpx
+celery[redis]
+redis
+python-multipart
