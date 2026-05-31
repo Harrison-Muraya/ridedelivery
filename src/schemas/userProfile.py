@@ -38,6 +38,7 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: Optional[str] = None
     vehicle_type: Optional[str] = None
     vehicle_plate: Optional[str] = None
+    national_id: Optional[str] = None
 
 
 class RiderAvailabilityRequest(BaseModel):
