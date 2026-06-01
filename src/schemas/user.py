@@ -53,33 +53,74 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     phone: str
-    role: Optional[str] = None       # extracted via validator below
+    role: Optional[str] = None
     is_active: bool
     is_verified: bool
     created_at: datetime
     profile: Optional[ProfileOut] = None
-    roles: List[str] = [] 
-    
+    roles: List[str] = []
 
     @model_validator(mode="before")
     @classmethod
-    def extract_role(cls, obj):
-        # obj is the ORM User instance when from_attributes=True
+    def extract_roles_and_role(cls, obj):
         if hasattr(obj, "roles") and obj.roles:
-            # roles is a list of UserRoleMap; take the first role's value
-            object.__setattr__(obj, "_role_str", obj.roles[0].role.value)
+            # Coerce UserRoleMap objects → plain strings
+            role_strings = [
+                r.role.value if hasattr(r, "role") else str(r)
+                for r in obj.roles
+            ]
+            try:
+                object.__setattr__(obj, "roles", role_strings)
+            except AttributeError:
+                pass
+            try:
+                object.__setattr__(obj, "_role_str", role_strings[0])
+            except AttributeError:
+                pass
         return obj
-
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
         instance = super().model_validate(obj, **kwargs)
-        # Inject the role we extracted above
         if hasattr(obj, "_role_str"):
             instance.role = obj._role_str
-        elif hasattr(obj, "roles") and obj.roles:
-            instance.role = obj.roles[0].role.value
+        elif instance.roles:
+            instance.role = instance.roles[0]
         return instance
+
+# class UserResponse(BaseModel):
+#     model_config = ConfigDict(from_attributes=True)
+
+#     id: UUID
+#     email: str
+#     phone: str
+#     role: Optional[str] = None       # extracted via validator below
+#     is_active: bool
+#     is_verified: bool
+#     created_at: datetime
+#     profile: Optional[ProfileOut] = None
+#     roles: List[str] = [] 
+    
+
+#     @model_validator(mode="before")
+#     @classmethod
+#     def extract_role(cls, obj):
+#         # obj is the ORM User instance when from_attributes=True
+#         if hasattr(obj, "roles") and obj.roles:
+#             # roles is a list of UserRoleMap; take the first role's value
+#             object.__setattr__(obj, "_role_str", obj.roles[0].role.value)
+#         return obj
+
+
+#     @classmethod
+#     def model_validate(cls, obj, **kwargs):
+#         instance = super().model_validate(obj, **kwargs)
+#         # Inject the role we extracted above
+#         if hasattr(obj, "_role_str"):
+#             instance.role = obj._role_str
+#         elif hasattr(obj, "roles") and obj.roles:
+#             instance.role = obj.roles[0].role.value
+#         return instance
     
 
 class UpdateProfileRequest(BaseModel):

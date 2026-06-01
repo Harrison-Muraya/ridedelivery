@@ -16,11 +16,10 @@ from src.core.security import (
 
 class AuthService:
     """Authentication service for user management"""
-    
+
     @staticmethod
-    async def register_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
-        """Register a new user"""
-         # Check duplicate email / phone
+    async def register_user(payload: UserCreate, db: AsyncSession) -> User:
+        # Check duplicate email / phone
         result = await db.execute(select(User).where(User.email == payload.email))
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -29,27 +28,34 @@ class AuthService:
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Phone number already registered")
 
-        
-        # Create new user
+        # Create user first
         user = User(
             email=payload.email,
             phone=payload.phone,
             hashed_password=hash_password(payload.password),
         )
         db.add(user)
-        await db.flush()
+        await db.flush()  # get user.id
 
+        # Add role
         role_map = UserRoleMap(user_id=user.id, role=payload.role)
         db.add(role_map)
 
+        # Add profile
         profile = UserProfile(
             user_id=user.id,
             first_name=payload.first_name,
             last_name=payload.last_name,
         )
         db.add(profile)
+
+        # Flush all pending inserts (role_map + profile) before re-fetching
         await db.flush()
-        
+
+        # expire the cached user instance so selectinload fetches fresh data
+        await db.refresh(user)
+
+        # Re-fetch with relationships loaded
         result = await db.execute(
             select(User)
             .where(User.id == user.id)
@@ -57,8 +63,52 @@ class AuthService:
                 selectinload(User.roles),
                 selectinload(User.profile),
             )
+            .execution_options(populate_existing=True)  # bypass identity map cache
         )
         return result.scalar_one()
+    
+    # @staticmethod
+    # async def register_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
+    #     """Register a new user"""
+    #      # Check duplicate email / phone
+    #     result = await db.execute(select(User).where(User.email == payload.email))
+    #     if result.scalar_one_or_none():
+    #         raise HTTPException(status_code=400, detail="Email already registered")
+
+    #     result = await db.execute(select(User).where(User.phone == payload.phone))
+    #     if result.scalar_one_or_none():
+    #         raise HTTPException(status_code=400, detail="Phone number already registered")
+
+        
+    #     # Create new user
+    #     user = User(
+    #         email=payload.email,
+    #         phone=payload.phone,
+    #         hashed_password=hash_password(payload.password),
+    #     )
+    #     db.add(user)
+    #     await db.flush()
+
+    #     role_map = UserRoleMap(user_id=user.id, role=payload.role)
+    #     db.add(role_map)
+
+    #     profile = UserProfile(
+    #         user_id=user.id,
+    #         first_name=payload.first_name,
+    #         last_name=payload.last_name,
+    #     )
+    #     db.add(profile)
+    #     await db.flush()
+        
+    #     result = await db.execute(
+    #         select(User)
+    #         .where(User.id == user.id)
+    #         .options(
+    #             selectinload(User.roles),
+    #             selectinload(User.profile),
+    #         )
+    #     )
+    #     return result.scalar_one()
     
     @staticmethod
     async def authenticate_user(payload: UserLogin, db: AsyncSession = Depends(get_db)) -> User:
