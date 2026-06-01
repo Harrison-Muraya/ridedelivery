@@ -121,18 +121,36 @@ def verify_token(token: str) -> TokenData:
     
 
 def require_role(role: UserRole):
-    """Factory that returns a dependency enforcing a specific role."""
     async def _check(
-        current_user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        db: AsyncSession = Depends(get_db),  # same session FastAPI will inject to endpoint
     ) -> User:
-        result = await db.execute(
-            select(UserRoleMap).where(
-                UserRoleMap.user_id == current_user.id,
-                UserRoleMap.role == role,
-            )
+        token = credentials.credentials
+        credentials_exception = HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        if result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
-        return current_user
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id: str = payload.get("user_id")
+            if not user_id:
+                raise credentials_exception
+        except JWTError:
+            raise credentials_exception
+
+        result = await db.execute(
+            select(User)
+            .where(User.id == user_id)
+            .options(selectinload(User.roles), selectinload(User.profile))
+        )
+        user = result.scalar_one_or_none()
+        if not user or not user.is_active:
+            raise credentials_exception
+
+        has_role = any(r.role == role for r in user.roles)
+        if not has_role:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        return user
     return _check
