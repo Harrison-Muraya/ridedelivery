@@ -22,7 +22,7 @@ class User(Base, TimestampMixin, StatusFlagMixin):
     is_verified = Column(Boolean, default=False, nullable=False)
     last_login = Column(DateTime(timezone=True), nullable=True)
 
-    roles = relationship("UserRoleMap", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    roles = relationship("UserRoleMap", back_populates="user", cascade="all, delete-orphan", passive_deletes=True, lazy="noload")
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     location = relationship("UserLocation", back_populates="user", uselist=False, cascade="all, delete-orphan")
     requests_made = relationship("Request", foreign_keys="Request.customer_id", back_populates="customer")

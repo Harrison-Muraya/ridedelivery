@@ -199,6 +199,18 @@ async def get_billing(
     )
     billing = result.scalar_one_or_none()
     if not billing:
+        # Check if the request exists and is completed — if so, billing is just pending
+        req_result = await db.execute(
+            select(Request).where(
+                and_(Request.id == request_id, Request.customer_id == current_user.id)
+            )
+        )
+        req = req_result.scalar_one_or_none()
+        if req and req.request_status == RequestStatus.completed:
+            raise HTTPException(
+                status_code=202,  # 202 Accepted — exists but not ready yet
+                detail="Billing is being generated, please try again in a moment"
+            )
         raise HTTPException(status_code=404, detail="Billing record not found")
     return billing
 

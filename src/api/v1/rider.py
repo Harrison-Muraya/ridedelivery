@@ -250,7 +250,7 @@ async def complete_trip(
     req = await _get_rider_request(db, request_id, current_user.id, RequestStatus.in_progress)
     req.request_status = RequestStatus.completed
     req.completed_at = datetime.now(timezone.utc)
-    req.final_fare = req.estimated_fare
+    req.final_fare = req.estimated_fare # In real app, calculate based on distance/time
     await db.flush()
 
     # Update rider trip count

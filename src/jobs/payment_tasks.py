@@ -78,16 +78,16 @@ def process_mpesa_callback(checkout_request_id: str, result_code: int, receipt_n
         db.close()
 
 
+# src/jobs/payment_tasks.py
+
 @celery_app.task(name="src.jobs.payment_tasks.create_billing_record")
 def create_billing_record(request_id: str, rider_id: str):
-    """
-    Create a Billing record once a trip is marked completed.
-    Called asynchronously after the rider marks the trip done.
-    """
     from src.models.requests import Request
     from src.models.billing import Billing
     from src.models.enums import BillingStatus
+    from src.models.misc import PricingConfig
     from decimal import Decimal
+    import asyncio
 
     db = _get_sync_db()
     try:
@@ -95,12 +95,34 @@ def create_billing_record(request_id: str, rider_id: str):
         if not request:
             return
 
-        # Check if billing already exists
         existing = db.query(Billing).filter(Billing.request_id == request.id).first()
         if existing:
             return
 
         total = Decimal(str(request.final_fare or request.estimated_fare or 0))
+
+        # Try to get the active pricing config for proper breakdown
+        config = db.query(PricingConfig).filter(
+            PricingConfig.request_type == request.request_type,
+            PricingConfig.is_active == True,
+        ).first()
+
+        if config and request.distance_km:
+            dist = Decimal(str(round(request.distance_km, 2)))
+            est_minutes = request.estimated_minutes or 0
+
+            base_fare = Decimal(str(config.base_fare))
+            distance_charge = Decimal(str(config.per_km_rate)) * dist
+            time_charge = Decimal(str(config.per_minute_rate)) * Decimal(str(est_minutes))
+            surge = Decimal(str(config.surge_multiplier))
+            surge_charge = (surge - 1) * (base_fare + distance_charge + time_charge)
+        else:
+            # Fallback — reconstruct best-effort from total
+            base_fare = Decimal("50.00")
+            distance_charge = total - base_fare
+            time_charge = Decimal("0.00")
+            surge_charge = Decimal("0.00")
+
         commission_pct = Decimal("20.0")
         rider_earnings = total * (1 - commission_pct / 100)
 
@@ -108,10 +130,10 @@ def create_billing_record(request_id: str, rider_id: str):
             request_id=request.id,
             customer_id=request.customer_id,
             rider_id=UUID(rider_id),
-            base_fare=Decimal("50.00"),
-            distance_charge=total - Decimal("50.00"),
-            time_charge=Decimal("0.00"),
-            surge_charge=Decimal("0.00"),
+            base_fare=base_fare,
+            distance_charge=distance_charge,
+            time_charge=time_charge,
+            surge_charge=surge_charge,
             discount=Decimal("0.00"),
             total_amount=total,
             platform_commission_pct=float(commission_pct),

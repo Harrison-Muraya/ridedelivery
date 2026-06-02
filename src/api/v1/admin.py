@@ -161,19 +161,32 @@ async def list_users(
     current_user: User = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    # Step 1: get matching user IDs first (clean, no relationship loading)
+    id_stmt = select(User.id)
+    if role:
+        role_subq = select(UserRoleMap.user_id).where(UserRoleMap.role == role)
+        id_stmt = id_stmt.where(User.id.in_(role_subq))
+    id_stmt = id_stmt.limit(100)
+    
+    id_result = await db.execute(id_stmt)
+    user_ids = [row[0] for row in id_result.all()]
+    
+    if not user_ids:
+        return []
+
+    # Step 2: load full user objects with relationships, using in_() not unique()
     stmt = (
         select(User)
+        .where(User.id.in_(user_ids))
         .options(
             selectinload(User.profile),
             selectinload(User.roles),
         )
     )
-    if role:
-        role_subq = select(UserRoleMap.user_id).where(UserRoleMap.role == role)
-        stmt = stmt.where(User.id.in_(role_subq))
-
-    result = await db.execute(stmt.limit(100))
-    return result.scalars().unique().all()
+    result = await db.execute(stmt)
+    # Use scalars().all() WITHOUT unique() — in_() guarantees no duplicates
+    users = result.scalars().all()
+    return users
 
 @router.post("/users/{user_id}/deactivate")
 async def deactivate_user(

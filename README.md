@@ -36,7 +36,13 @@ uvicorn src.main:app --reload
 celery -A src.jobs.celery_app worker -Q rides -c 4 --loglevel=info
 celery -A src.jobs.celery_app worker -Q notifications -c 4 --loglevel=info
 celery -A src.jobs.celery_app worker -Q payments -c 2 --loglevel=info
+
+# 7. for windows -->
+celery -A src.jobs.celery_app worker -Q rides -P solo -n rides@%h --loglevel=info
+celery -A src.jobs.celery_app worker -Q notifications -P solo -n notifications@%h --loglevel=info
+celery -A src.jobs.celery_app worker -Q payments -P solo -n payments@%h --loglevel=info
 ```
+
 
 ---
 
