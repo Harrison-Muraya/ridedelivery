@@ -59,7 +59,13 @@ class AuthService:
     @staticmethod
     async def authenticate_user(payload: UserLogin, db: AsyncSession = Depends(get_db)) -> User:
         """Authenticate user by email/phone and password"""
-        result = await db.execute(select(User).where((User.email == payload.email) | (User.phone == payload.email)).options(selectinload(User.roles)))
+        result = await db.execute(select(User)
+                                  .where((User.email == payload.email) | (User.phone == payload.email))
+                                  .options(
+                                      selectinload(User.roles),
+                                      selectinload(User.profile),
+                                      )
+                                    )
         user = result.scalar_one_or_none()
         
         if not user or not verify_password(payload.password, user.hashed_password):

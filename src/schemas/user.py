@@ -64,19 +64,23 @@ class UserResponse(BaseModel):
     @classmethod
     def extract_roles_and_role(cls, obj):
         if hasattr(obj, "roles") and obj.roles:
-            # Coerce UserRoleMap objects → plain strings
             role_strings = [
                 r.role.value if hasattr(r, "role") else str(r)
                 for r in obj.roles
             ]
-            try:
-                object.__setattr__(obj, "roles", role_strings)
-            except AttributeError:
-                pass
-            try:
-                object.__setattr__(obj, "_role_str", role_strings[0])
-            except AttributeError:
-                pass
+            # Don't mutate the ORM object — return a dict instead
+            data = {
+                "id": obj.id,
+                "email": obj.email,
+                "phone": obj.phone,
+                "is_active": obj.is_active,
+                "is_verified": obj.is_verified,
+                "created_at": obj.created_at,
+                "profile": obj.profile,
+                "roles": role_strings,
+                "role": role_strings[0] if role_strings else None,
+            }
+            return data
         return obj
 
     @classmethod

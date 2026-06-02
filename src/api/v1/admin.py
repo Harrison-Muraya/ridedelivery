@@ -155,19 +155,25 @@ async def list_escalated(
 
 
 # ─── Users & Riders ───────────────────────────────────────────────────────────
-
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
     role: str = None,
     current_user: User = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(User).options(selectinload(User.profile), selectinload(User.roles),)
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.profile),
+            selectinload(User.roles),
+        )
+    )
     if role:
-        stmt = stmt.join(UserRoleMap).where(UserRoleMap.role == role)
+        role_subq = select(UserRoleMap.user_id).where(UserRoleMap.role == role)
+        stmt = stmt.where(User.id.in_(role_subq))
+
     result = await db.execute(stmt.limit(100))
     return result.scalars().unique().all()
-
 
 @router.post("/users/{user_id}/deactivate")
 async def deactivate_user(
