@@ -1,4 +1,4 @@
-# RideDelivery API
+# Ashkey RideDelivery API
 
 A FastAPI-based ride-hailing and delivery platform for the Kenyan market (M-Pesa, KSH pricing).
 
