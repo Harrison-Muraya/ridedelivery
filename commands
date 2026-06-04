@@ -1,4 +1,7 @@
 
+
+uvicorn src.main:app --reload --host 192.168.100.8 --port 8000
+
 steps for alembic and setup
 1. Initialize alembic (creates the alembic/ folder and alembic.ini)
     alembic init alembic
