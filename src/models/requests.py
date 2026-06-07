@@ -62,7 +62,7 @@ class RequestAssignment(Base, TimestampMixin, StatusFlagMixin):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     request_id = Column(UUID(as_uuid=True), ForeignKey("requests.id", ondelete="CASCADE"), nullable=False, index=True)
-    rider_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    rider_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     assignment_status = Column(SAEnum(AssignmentStatus), nullable=False, default=AssignmentStatus.pending)
     attempt_number = Column(Integer, nullable=False, default=1)
     distance_at_assignment_km = Column(Float, nullable=True)

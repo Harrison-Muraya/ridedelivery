@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List
 from uuid import UUID
 
@@ -9,12 +9,13 @@ from sqlalchemy.orm import selectinload
 
 from src.database import get_db
 from src.core.security import get_current_user, require_role
-from src.models.user import User, UserProfile, FavoriteRider
+from src.models.user import User, UserProfile, FavoriteRider, UserRoleMap
 from src.models.requests import Request, RequestAssignment
 from src.models.misc import Rating, Notification
 from src.models.billing import Billing, Transaction
 from src.models.enums import (
-    UserRole, RequestStatus, AssignmentStatus, PaymentMethod, TransactionStatus
+    UserRole, RequestStatus, AssignmentStatus, PaymentMethod,
+    TransactionStatus, NotificationType
 )
 from src.schemas.requests import CreateRideRequest, RequestOut, FareEstimateOut
 from src.schemas.rating import CreateRatingRequest, RatingOut
@@ -29,6 +30,9 @@ from src.services import mpesa as mpesa_service
 router = APIRouter(prefix="/customer", tags=["Customer"])
 
 _require_customer = require_role(UserRole.customer)
+
+# How long a customer must wait before they are allowed to self-escalate (minutes)
+CUSTOMER_ESCALATION_WAIT_MINUTES = 10
 
 
 # ─── Profile ──────────────────────────────────────────────────────────────────
@@ -55,7 +59,6 @@ async def update_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(profile, field, value)
     await db.flush()
@@ -121,7 +124,6 @@ async def create_request(
     db.add(req)
     await db.flush()
 
-    # Kick off rider search asynchronously
     from src.jobs.ride_tasks import dispatch_ride_search
     dispatch_ride_search.delay(str(req.id))
 
@@ -159,6 +161,75 @@ async def get_request(
     return req
 
 
+@router.get("/requests/{request_id}/status")
+async def track_request_status(
+    request_id: UUID,
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Live status polling endpoint — returns the request status, the assigned
+    rider's public profile, and how long the customer has been waiting.
+    Designed for the customer app to poll every few seconds.
+    """
+    result = await db.execute(
+        select(Request)
+        .where(and_(Request.id == request_id, Request.customer_id == current_user.id))
+        .options(selectinload(Request.assignments))
+    )
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    # Find the accepted assignment (if any) to expose rider info
+    rider_info = None
+    accepted = next(
+        (a for a in req.assignments if a.assignment_status == AssignmentStatus.accepted),
+        None,
+    )
+    if accepted:
+        profile_result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == accepted.rider_id)
+        )
+        profile = profile_result.scalar_one_or_none()
+        if profile:
+            rider_info = {
+                "rider_id": str(accepted.rider_id),
+                "name": f"{profile.first_name} {profile.last_name}",
+                "rating_avg": round(profile.rating_avg, 2),
+                "total_trips": profile.total_trips,
+                "vehicle_type": profile.vehicle_type,
+                "vehicle_plate": profile.vehicle_plate,
+            }
+
+    # How long since the request was created
+    now = datetime.now(timezone.utc)
+    created_at = req.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    waiting_seconds = int((now - created_at).total_seconds())
+
+    # Tell the customer whether they are eligible to escalate
+    can_escalate = (
+        req.request_status in (RequestStatus.pending, RequestStatus.searching)
+        and waiting_seconds >= CUSTOMER_ESCALATION_WAIT_MINUTES * 60
+    )
+
+    return {
+        "request_id": str(req.id),
+        "request_status": req.request_status,
+        "waiting_seconds": waiting_seconds,
+        "can_escalate": can_escalate,
+        "escalation_available_after_seconds": CUSTOMER_ESCALATION_WAIT_MINUTES * 60,
+        "rider": rider_info,
+        "accepted_at": req.accepted_at,
+        "started_at": req.started_at,
+        "completed_at": req.completed_at,
+        "estimated_fare": req.estimated_fare,
+        "final_fare": req.final_fare,
+    }
+
+
 @router.post("/requests/{request_id}/cancel", response_model=RequestOut)
 async def cancel_request(
     request_id: UUID,
@@ -184,6 +255,137 @@ async def cancel_request(
     return req
 
 
+@router.post("/requests/{request_id}/escalate")
+async def escalate_request(
+    request_id: UUID,
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Customer-initiated escalation.
+
+    Rules:
+    - Request must still be in pending or searching state (no rider accepted yet).
+    - At least CUSTOMER_ESCALATION_WAIT_MINUTES must have passed since the
+      request was created.
+    - Marks the request as admin_escalated and notifies all admins.
+    """
+    result = await db.execute(
+        select(Request).where(
+            and_(Request.id == request_id, Request.customer_id == current_user.id)
+        )
+    )
+    req = result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if req.request_status not in (RequestStatus.pending, RequestStatus.searching):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Only requests that have not yet been accepted can be escalated. "
+                f"Current status: {req.request_status}"
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+    created_at = req.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+
+    wait_seconds = (now - created_at).total_seconds()
+    min_wait = CUSTOMER_ESCALATION_WAIT_MINUTES * 60
+    if wait_seconds < min_wait:
+        remaining = int(min_wait - wait_seconds)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"You can escalate after {CUSTOMER_ESCALATION_WAIT_MINUTES} minutes of waiting. "
+                f"Please wait {remaining} more second(s)."
+            ),
+        )
+
+    req.request_status = RequestStatus.admin_escalated
+    await db.flush()
+
+    # Notify all active admins
+    admin_ids_result = await db.execute(
+        select(UserRoleMap.user_id)
+        .join(User, User.id == UserRoleMap.user_id)
+        .where(and_(UserRoleMap.role == UserRole.admin, User.is_active == True))
+    )
+    admin_ids = [row[0] for row in admin_ids_result.all()]
+
+    for admin_id in admin_ids:
+        notif = Notification(
+            user_id=admin_id,
+            notification_type=NotificationType.request_escalated,
+            title="Customer Escalated a Request",
+            body=(
+                f"Customer has been waiting over {CUSTOMER_ESCALATION_WAIT_MINUTES} minutes "
+                f"with no rider. Request ID: {req.id}"
+            ),
+            data=str({"request_id": str(req.id), "customer_id": str(current_user.id)}),
+        )
+        db.add(notif)
+
+    # Also notify the customer that their escalation was received
+    db.add(Notification(
+        user_id=current_user.id,
+        notification_type=NotificationType.request_escalated,
+        title="Request Escalated",
+        body="Your request has been escalated to our admin team. We will assign a rider shortly.",
+        data=str({"request_id": str(req.id)}),
+    ))
+
+    await db.flush()
+
+    return {
+        "message": "Request escalated successfully. Our team has been notified.",
+        "request_id": str(req.id),
+        "request_status": req.request_status,
+    }
+
+
+# ─── Rider Public Profile ─────────────────────────────────────────────────────
+
+@router.get("/riders/{rider_id}/profile")
+async def get_rider_public_profile(
+    rider_id: UUID,
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Public profile of a rider — name, rating, total trips, vehicle info.
+    Customers use this to see who is on the way after a request is accepted.
+    Does NOT expose sensitive fields like wallet balance or national ID.
+    """
+    result = await db.execute(
+        select(UserProfile)
+        .join(UserRoleMap, UserRoleMap.user_id == UserProfile.user_id)
+        .where(
+            and_(
+                UserProfile.user_id == rider_id,
+                UserRoleMap.role == UserRole.rider,
+            )
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    return {
+        "rider_id": str(rider_id),
+        "name": f"{profile.first_name} {profile.last_name}",
+        "avatar_url": profile.avatar_url,
+        "vehicle_type": profile.vehicle_type,
+        "vehicle_plate": profile.vehicle_plate,
+        "rating_avg": round(profile.rating_avg, 2),
+        "rating_count": profile.rating_count,
+        "total_trips": profile.total_trips,
+    }
+
+
 # ─── Billing & Payments ───────────────────────────────────────────────────────
 
 @router.get("/billing/{request_id}", response_model=BillingOut)
@@ -199,7 +401,6 @@ async def get_billing(
     )
     billing = result.scalar_one_or_none()
     if not billing:
-        # Check if the request exists and is completed — if so, billing is just pending
         req_result = await db.execute(
             select(Request).where(
                 and_(Request.id == request_id, Request.customer_id == current_user.id)
@@ -208,11 +409,26 @@ async def get_billing(
         req = req_result.scalar_one_or_none()
         if req and req.request_status == RequestStatus.completed:
             raise HTTPException(
-                status_code=202,  # 202 Accepted — exists but not ready yet
-                detail="Billing is being generated, please try again in a moment"
+                status_code=202,
+                detail="Billing is being generated, please try again in a moment",
             )
         raise HTTPException(status_code=404, detail="Billing record not found")
     return billing
+
+
+@router.get("/billing", response_model=List[BillingOut])
+async def list_billing_history(
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full billing history for the customer — all paid and unpaid bills."""
+    result = await db.execute(
+        select(Billing)
+        .where(Billing.customer_id == current_user.id)
+        .order_by(Billing.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
 
 
 @router.post("/payments/initiate", response_model=TransactionOut)
@@ -234,7 +450,7 @@ async def initiate_payment(
         phone=payload.phone,
         amount=float(billing.total_amount),
         account_reference=str(billing.id)[:10],
-        description=f"RideDelivery payment",
+        description="RideDelivery payment",
     )
 
     txn = Transaction(
@@ -252,6 +468,21 @@ async def initiate_payment(
     return txn
 
 
+@router.get("/payments/transactions", response_model=List[TransactionOut])
+async def list_transactions(
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """All M-Pesa transaction attempts by the customer."""
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.user_id == current_user.id)
+        .order_by(Transaction.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
+
+
 # ─── Ratings ──────────────────────────────────────────────────────────────────
 
 @router.post("/ratings", response_model=RatingOut, status_code=status.HTTP_201_CREATED)
@@ -260,7 +491,6 @@ async def submit_rating(
     current_user: User = Depends(_require_customer),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify the request belongs to this customer
     result = await db.execute(
         select(Request).where(
             and_(
@@ -273,7 +503,6 @@ async def submit_rating(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Completed request not found")
 
-    # Prevent duplicate
     dup = await db.execute(
         select(Rating).where(
             and_(Rating.request_id == payload.request_id, Rating.rater_id == current_user.id)
@@ -291,10 +520,23 @@ async def submit_rating(
     )
     db.add(rating)
     await db.flush()
-
-    # Update ratee's average rating
     await _update_rating_avg(db, payload.ratee_id)
     return rating
+
+
+@router.get("/ratings", response_model=List[RatingOut])
+async def list_my_ratings_given(
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """All ratings the customer has submitted."""
+    result = await db.execute(
+        select(Rating)
+        .where(Rating.rater_id == current_user.id)
+        .order_by(Rating.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
 
 
 async def _update_rating_avg(db: AsyncSession, user_id: UUID):
@@ -315,6 +557,38 @@ async def _update_rating_avg(db: AsyncSession, user_id: UUID):
 
 
 # ─── Favourites ───────────────────────────────────────────────────────────────
+
+@router.get("/favourites", response_model=List[dict])
+async def list_favourites(
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """All riders the customer has saved as favourites, with their public profile."""
+    result = await db.execute(
+        select(FavoriteRider)
+        .where(FavoriteRider.customer_id == current_user.id)
+        .options(selectinload(FavoriteRider.rider))
+    )
+    favs = result.scalars().all()
+
+    out = []
+    for fav in favs:
+        profile_result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == fav.rider_id)
+        )
+        profile = profile_result.scalar_one_or_none()
+        out.append({
+            "rider_id": str(fav.rider_id),
+            "name": f"{profile.first_name} {profile.last_name}" if profile else "Unknown",
+            "avatar_url": profile.avatar_url if profile else None,
+            "vehicle_type": profile.vehicle_type if profile else None,
+            "rating_avg": round(profile.rating_avg, 2) if profile else 0.0,
+            "total_trips": profile.total_trips if profile else 0,
+            "is_available": profile.is_available if profile else False,
+            "saved_at": fav.created_at,
+        })
+    return out
+
 
 @router.post("/favourites/{rider_id}", status_code=status.HTTP_201_CREATED)
 async def add_favourite(
@@ -387,3 +661,27 @@ async def mark_notification_read(
     notif.read_at = datetime.now(timezone.utc)
     await db.flush()
     return {"message": "Marked as read"}
+
+
+@router.post("/notifications/read-all")
+async def mark_all_notifications_read(
+    current_user: User = Depends(_require_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark every unread notification as read in one call."""
+    result = await db.execute(
+        select(Notification).where(
+            and_(
+                Notification.user_id == current_user.id,
+                Notification.is_read == False,
+            )
+        )
+    )
+    now = datetime.now(timezone.utc)
+    count = 0
+    for notif in result.scalars().all():
+        notif.is_read = True
+        notif.read_at = now
+        count += 1
+    await db.flush()
+    return {"message": f"{count} notification(s) marked as read"}

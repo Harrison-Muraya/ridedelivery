@@ -6,14 +6,18 @@ Flow:
   2. assignment_timeout_task  – fires after RIDER_RESPONSE_TIMEOUT_SECONDS
      a. marks assignment as timeout
      b. calls dispatch_ride_search again (next attempt)
-  3. If MAX_ASSIGNMENT_ATTEMPTS exceeded → escalate_to_admin
+  3. If MAX_ATTEMPTS exceeded → escalate_to_admin
+
+Bug fixed: when no riders are found, we now create a "no_riders" sentinel
+assignment record so the attempt counter actually increments on each retry.
+Without this, assignments stayed empty, attempt_number was always 1, radius
+never expanded, and the task retried forever without escalating.
 """
 
 import logging
 from uuid import UUID
 
 from celery import shared_task
-from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.jobs.celery_app import celery_app
@@ -23,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 def _get_sync_db():
-    """Create a synchronous DB session for use inside Celery tasks."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     engine = create_engine(settings.DATABASE_URL_SYNC)
@@ -33,10 +36,6 @@ def _get_sync_db():
 
 @celery_app.task(name="src.jobs.ride_tasks.dispatch_ride_search", bind=True, max_retries=3)
 def dispatch_ride_search(self, request_id: str):
-    """
-    Find the nearest available rider and create a RequestAssignment.
-    Schedules an assignment_timeout_task to handle non-response.
-    """
     from src.models.requests import Request, RequestAssignment
     from src.models.enums import RequestStatus, AssignmentStatus
     from src.models.user import UserProfile, UserLocation, UserRoleMap
@@ -60,12 +59,18 @@ def dispatch_ride_search(self, request_id: str):
             RequestStatus.cancelled,
             RequestStatus.completed,
             RequestStatus.assigned,
+            RequestStatus.admin_escalated,
         ):
             logger.info("Request %s already in terminal/assigned state, skipping", request_id)
             return
 
-        tried_ids = [a.rider_id for a in request.assignments]
-        attempt_number = len(tried_ids) + 1
+        # Count ALL previous attempts, including "no_riders" sentinel rows.
+        # This is what was broken before — only counting rows with a real rider_id
+        # meant the counter stayed at 1 forever when no riders were found.
+        tried_rider_ids = [
+            a.rider_id for a in request.assignments if a.rider_id is not None
+        ]
+        attempt_number = len(request.assignments) + 1
 
         if attempt_number > settings.MAX_ASSIGNMENT_ATTEMPTS:
             _escalate_to_admin(db, request)
@@ -76,7 +81,12 @@ def dispatch_ride_search(self, request_id: str):
             settings.MAX_SEARCH_RADIUS_KM,
         )
 
-        # Find nearest available rider not already tried
+        logger.info(
+            "Request %s — attempt %d, radius %.1f km, excluding %d tried riders",
+            request_id, attempt_number, radius_km, len(tried_rider_ids),
+        )
+
+        # Find nearest available riders not already tried
         riders = (
             db.query(UserProfile, UserLocation)
             .join(UserLocation, UserLocation.user_id == UserProfile.user_id)
@@ -84,7 +94,7 @@ def dispatch_ride_search(self, request_id: str):
             .filter(
                 UserProfile.is_available == True,
                 UserRoleMap.role == UserRole.rider,
-                ~UserProfile.user_id.in_(tried_ids),
+                ~UserProfile.user_id.in_(tried_rider_ids) if tried_rider_ids else True,
             )
             .all()
         )
@@ -111,16 +121,30 @@ def dispatch_ride_search(self, request_id: str):
                 "No riders found for request %s (attempt %d, radius %.1f km)",
                 request_id, attempt_number, radius_km,
             )
+
+            # FIX: Record a sentinel assignment row with no rider so the attempt
+            # counter increments correctly on the next retry. Without this, 
+            # attempt_number was always 1 and the task looped forever.
+            sentinel = RequestAssignment(
+                request_id=request.id,
+                rider_id=None,           # no rider found this round
+                attempt_number=attempt_number,
+                assignment_status=AssignmentStatus.timeout,
+                rejection_reason="no_riders_available",
+            )
+            db.add(sentinel)
+            request.request_status = RequestStatus.searching
+            db.commit()
+
             if attempt_number >= settings.MAX_ASSIGNMENT_ATTEMPTS:
                 _escalate_to_admin(db, request)
             else:
-                # Retry after a short delay to wait for riders to come online
+                # Retry after a delay to give riders a chance to come online
                 self.apply_async(args=[request_id], countdown=60)
             return
 
         rider_id, dist_km = candidates[0]
 
-        # Create assignment record
         assignment = RequestAssignment(
             request_id=request.id,
             rider_id=rider_id,
@@ -140,7 +164,6 @@ def dispatch_ride_search(self, request_id: str):
         assignment.timeout_task_id = timeout_task.id
         db.commit()
 
-        # Notify the rider
         send_rider_assignment_notification.delay(
             str(rider_id), str(request.id), str(assignment.id)
         )
@@ -160,12 +183,8 @@ def dispatch_ride_search(self, request_id: str):
 
 @celery_app.task(name="src.jobs.ride_tasks.assignment_timeout_task")
 def assignment_timeout_task(assignment_id: str):
-    """
-    Fires when a rider has not responded within the timeout window.
-    Marks assignment as timeout and tries the next rider.
-    """
-    from src.models.requests import RequestAssignment, Request
-    from src.models.enums import AssignmentStatus, RequestStatus
+    from src.models.requests import RequestAssignment
+    from src.models.enums import AssignmentStatus
 
     db = _get_sync_db()
     try:
@@ -176,7 +195,6 @@ def assignment_timeout_task(assignment_id: str):
         if not assignment:
             return
         if assignment.assignment_status != AssignmentStatus.pending:
-            # Already responded; timeout irrelevant
             return
 
         assignment.assignment_status = AssignmentStatus.timeout
@@ -193,8 +211,6 @@ def assignment_timeout_task(assignment_id: str):
 
 
 def _escalate_to_admin(db, request):
-    """Mark request as escalated and notify all admins."""
-    from src.models.requests import Request
     from src.models.enums import RequestStatus, NotificationType
     from src.models.user import User, UserRoleMap
     from src.models.enums import UserRole
@@ -219,4 +235,4 @@ def _escalate_to_admin(db, request):
         )
         db.add(notif)
     db.commit()
-    logger.warning("Request %s escalated to admin", request.id)
+    logger.warning("Request %s escalated to admin after %d attempts", request.id, settings.MAX_ASSIGNMENT_ATTEMPTS)
