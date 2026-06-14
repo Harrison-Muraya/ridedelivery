@@ -57,7 +57,8 @@ async def calculate_fare(
 
     distance_charge = per_km * dist
     time_charge = per_min * Decimal(str(estimated_minutes))
-    subtotal = (base_fare + distance_charge + time_charge) * surge
+    subtotal = (base_fare + distance_charge) * surge
+    # subtotal = (base_fare + distance_charge + time_charge) * surge
     total = max(subtotal, minimum)
 
     return {

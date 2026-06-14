@@ -53,7 +53,7 @@ class AssignmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     request_id: UUID
-    rider_id: UUID
+    rider_id: Optional[UUID] = None   
     assignment_status: AssignmentStatus
     attempt_number: int
     created_at: datetime
