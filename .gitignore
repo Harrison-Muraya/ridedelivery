@@ -1,10 +1,27 @@
-# ignore venv 
+# ignore venv
 venv/
+.venv/
+
 # ignore pycache
 __pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
 # ignore .env file
 .env
-# ignore .vscode settings
+
+# ignore IDE settings
 .vscode/
-# ignore .idea settings
 .idea/
+
+# tests / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.ruff_cache/
+

@@ -1,0 +1,13 @@
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+  "E501",  # line length handled loosely for existing code
+]
+
+[lint.per-file-ignores]
+"alembic/*" = ["E", "F", "I", "W"]
+"tests/*" = ["E402"]  # env setup before imports in conftest

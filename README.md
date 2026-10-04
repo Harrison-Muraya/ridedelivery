@@ -23,7 +23,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Configure environment
-cp src/env.example .env
+cp .env.example .env
 # Edit .env with your DB, Redis, M-Pesa credentials
 
 # 4. Run migrations
@@ -43,6 +43,48 @@ celery -A src.jobs.celery_app worker -Q notifications -P solo -n notifications@%
 celery -A src.jobs.celery_app worker -Q payments -P solo -n payments@%h --loglevel=info
 ```
 
+---
+
+## Testing
+
+```bash
+# Install test/lint tooling
+pip install -r requirements-dev.txt
+
+# Start a test Postgres (matches CI defaults)
+docker run --rm -d --name ridedelivery-test-db \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=ridedelivery_test \
+  -p 5432:5432 postgres:16
+
+# Unit tests (no DB required for most cases)
+pytest tests/unit -v
+
+# Full suite (unit + API integration)
+pytest -v --cov=src --cov-report=term-missing
+```
+
+Optional overrides:
+
+- `TEST_DATABASE_URL` — async SQLAlchemy URL for tests
+- `TEST_DATABASE_URL_SYNC` — sync URL for tools that need it
+
+---
+
+## CI/CD
+
+GitHub Actions workflows live under `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| **CI** | Push / PR to `main`, `master`, or `develop` | Ruff lint → pytest (Postgres service) → coverage artifact |
+| **CD** | Successful CI on `main`/`master`, version tags `v*`, or manual | Build Docker image and push to `ghcr.io/<owner>/ridedelivery` |
+
+Pull the published image:
+
+```bash
+docker pull ghcr.io/<owner>/ridedelivery:latest
+```
 
 ---
 
