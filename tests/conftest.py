@@ -8,8 +8,14 @@ test configuration instead of the local `.env`.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Callable
 from uuid import uuid4
+
+
+@asynccontextmanager
+async def _noop_lifespan(_app):
+    yield
 
 # Must run before importing application modules.
 os.environ["APP_ENV"] = "test"
@@ -106,10 +112,16 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[get_db] = override_get_db
 
-    transport = ASGITransport(app=app, lifespan="off")
+    # httpx ASGITransport has no lifespan= kwarg in 0.28.x; tables are created
+    # by the engine fixture, so skip the app lifespan (avoids a second init_db).
+    original_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _noop_lifespan
+
+    transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
+    app.router.lifespan_context = original_lifespan
     app.dependency_overrides.clear()
 
 
