@@ -88,6 +88,73 @@ docker pull ghcr.io/<owner>/ridedelivery:latest
 
 ---
 
+## Deploy on Ubuntu VPS
+
+Production stack: **Postgres + Redis + API + 3 Celery workers**, behind host **Nginx + Let's Encrypt**.
+
+### 1. Prepare the server
+
+SSH in, then run (once):
+
+```bash
+git clone https://github.com/<owner>/ridedelivery.git /opt/ridedelivery
+cd /opt/ridedelivery
+chmod +x deploy/setup-ubuntu.sh deploy/deploy.sh deploy/entrypoint.sh
+./deploy/setup-ubuntu.sh
+# log out and back in so the docker group applies
+```
+
+### 2. Configure secrets
+
+```bash
+cd /opt/ridedelivery
+cp .env.production.example .env
+nano .env   # set SECRET_KEY, POSTGRES_PASSWORD, M-Pesa keys, callback URL
+```
+
+Generate a strong secret:
+
+```bash
+openssl rand -hex 32
+```
+
+Point `MPESA_CALLBACK_URL` at your public domain, e.g.  
+`https://api.yourdomain.com/api/v1/payments/mpesa/callback`.
+
+### 3. Start the app
+
+```bash
+./deploy/deploy.sh
+curl -s http://127.0.0.1:8000/health
+```
+
+### 4. Public HTTPS (Nginx + Certbot)
+
+1. Point your domain's A record to the VPS IP.
+2. Edit `deploy/nginx/ridedelivery.conf` and replace `api.yourdomain.com`.
+3. Install the site and get a certificate:
+
+```bash
+sudo cp deploy/nginx/ridedelivery.conf /etc/nginx/sites-available/ridedelivery
+sudo ln -sf /etc/nginx/sites-available/ridedelivery /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.yourdomain.com
+```
+
+Docs: `http://api.yourdomain.com/docs`
+
+### Useful commands
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml pull   # if using a registry image
+./deploy/deploy.sh                               # rebuild + restart after git pull
+```
+
+---
+
 ## API Routes
 
 ### Auth
