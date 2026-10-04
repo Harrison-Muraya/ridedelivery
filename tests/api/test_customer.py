@@ -20,7 +20,8 @@ async def test_fare_estimate_requires_customer_role(client, auth_headers):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["distance_km"] > 0
-    assert body["estimated_fare"] >= 100
+    # Decimal fields are JSON-serialized as strings by Pydantic
+    assert float(body["estimated_fare"]) >= 100
     assert "breakdown" in body
 
 
