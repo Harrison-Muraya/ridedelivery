@@ -25,6 +25,7 @@ from src.schemas.notifications import NotificationOut
 from src.schemas.user import UpdateProfileRequest, ProfileOut, LocationUpdate, RiderAvailabilityRequest
 from src.services.distance import haversine_km, estimate_minutes
 from src.services.fare import calculate_fare
+from src.services.geo import validate_trip_coordinates
 from src.services import mpesa as mpesa_service
 
 router = APIRouter(prefix="/customer", tags=["Customer"])
@@ -78,7 +79,12 @@ async def fare_estimate(
     db: AsyncSession = Depends(get_db),
 ):
     from src.models.enums import RequestType
+    try:
+        validate_trip_coordinates(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     r_type = RequestType(request_type)
+    # Straight-line distance (not road distance). Road km will usually be higher.
     dist = haversine_km(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
     breakdown = await calculate_fare(db, r_type, dist)
     return FareEstimateOut(

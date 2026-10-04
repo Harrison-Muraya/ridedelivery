@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     INITIAL_SEARCH_RADIUS_KM: float = 3.0
     MAX_ASSIGNMENT_ATTEMPTS: int = 5
 
+    # Road routing (OSRM). Public demo server is fine for dev; self-host for production.
+    ROUTING_ENABLED: bool = True
+    OSRM_BASE_URL: str = "https://router.project-osrm.org"
+    OSRM_TIMEOUT_SECONDS: float = 8.0
+
     FCM_SERVER_KEY: str = ""  # Firebase Cloud Messaging for push notifications
 
     class Config:

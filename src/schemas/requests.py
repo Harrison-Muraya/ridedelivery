@@ -2,8 +2,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from src.models.enums import RequestType, RequestStatus, AssignmentStatus
+from src.services.geo import validate_trip_coordinates
 
 
 class CreateRideRequest(BaseModel):
@@ -18,6 +19,16 @@ class CreateRideRequest(BaseModel):
     package_description: Optional[str] = None
     recipient_name: Optional[str] = None
     recipient_phone: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_coordinates(self):
+        validate_trip_coordinates(
+            self.pickup_latitude,
+            self.pickup_longitude,
+            self.dropoff_latitude,
+            self.dropoff_longitude,
+        )
+        return self
 
 
 class RequestOut(BaseModel):
