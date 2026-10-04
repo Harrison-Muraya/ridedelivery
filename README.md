@@ -88,70 +88,23 @@ docker pull ghcr.io/<owner>/ridedelivery:latest
 
 ---
 
-## Deploy on Ubuntu VPS
+## Deploy on Ubuntu VPS + CD
 
-Production stack: **Postgres + Redis + API + 3 Celery workers**, behind host **Nginx + Let's Encrypt**.
+Production stack: **Postgres + Redis + API + 3 Celery workers**, behind host **Nginx + Let's Encrypt**.  
+GitHub Actions CD builds to `ghcr.io`, then SSHs into the VPS and restarts the stack.
 
-### 1. Prepare the server
+**Full checklist (your VPS `harr@197.248.201.233:1515`):** see [`deploy/VPS_CD.md`](deploy/VPS_CD.md).
 
-SSH in, then run (once):
-
-```bash
-git clone https://github.com/<owner>/ridedelivery.git /opt/ridedelivery
-cd /opt/ridedelivery
-chmod +x deploy/setup-ubuntu.sh deploy/deploy.sh deploy/entrypoint.sh
-./deploy/setup-ubuntu.sh
-# log out and back in so the docker group applies
-```
-
-### 2. Configure secrets
+Quick path:
 
 ```bash
-cd /opt/ridedelivery
-cp .env.production.example .env
-nano .env   # set SECRET_KEY, POSTGRES_PASSWORD, M-Pesa keys, callback URL
+ssh -p 1515 harr@197.248.201.233
+# add deploy public key (see deploy/VPS_CD.md), then:
+cd /opt/ridedelivery   # after clone/bootstrap
+./deploy/bootstrap-vps.sh
 ```
 
-Generate a strong secret:
-
-```bash
-openssl rand -hex 32
-```
-
-Point `MPESA_CALLBACK_URL` at your public domain, e.g.  
-`https://api.yourdomain.com/api/v1/payments/mpesa/callback`.
-
-### 3. Start the app
-
-```bash
-./deploy/deploy.sh
-curl -s http://127.0.0.1:8000/health
-```
-
-### 4. Public HTTPS (Nginx + Certbot)
-
-1. Point your domain's A record to the VPS IP.
-2. Edit `deploy/nginx/ridedelivery.conf` and replace `api.yourdomain.com`.
-3. Install the site and get a certificate:
-
-```bash
-sudo cp deploy/nginx/ridedelivery.conf /etc/nginx/sites-available/ridedelivery
-sudo ln -sf /etc/nginx/sites-available/ridedelivery /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d api.yourdomain.com
-```
-
-Docs: `http://api.yourdomain.com/docs`
-
-### Useful commands
-
-```bash
-docker compose -f docker-compose.prod.yml logs -f api
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml pull   # if using a registry image
-./deploy/deploy.sh                               # rebuild + restart after git pull
-```
+Add GitHub secrets `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `VPS_SSH_KEY` so every green CI on `main` deploys automatically.
 
 ---
 

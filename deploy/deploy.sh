@@ -29,13 +29,29 @@ if [[ -z "${SECRET_KEY:-}" || "${SECRET_KEY}" == "change-me-to-a-long-random-str
   exit 1
 fi
 
-chmod +x deploy/entrypoint.sh
+chmod +x deploy/entrypoint.sh deploy/remote-update.sh
 
-echo "==> Building images"
-docker compose -f docker-compose.prod.yml build
-
-echo "==> Starting stack"
-docker compose -f docker-compose.prod.yml up -d
+# shellcheck disable=SC1091
+if [[ -n "${APP_IMAGE:-}" ]]; then
+  if [[ -n "${GHCR_TOKEN:-}" ]]; then
+    echo "==> Logging in to ghcr.io"
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-harrison-muraya}" --password-stdin
+  fi
+  echo "==> Pulling ${APP_IMAGE}"
+  if docker compose -f docker-compose.prod.yml pull api; then
+    echo "==> Starting stack from registry image"
+    docker compose -f docker-compose.prod.yml up -d --remove-orphans
+  else
+    echo "==> Pull failed — building locally"
+    docker compose -f docker-compose.prod.yml build
+    docker compose -f docker-compose.prod.yml up -d --remove-orphans
+  fi
+else
+  echo "==> Building images"
+  docker compose -f docker-compose.prod.yml build
+  echo "==> Starting stack"
+  docker compose -f docker-compose.prod.yml up -d --remove-orphans
+fi
 
 echo "==> Status"
 docker compose -f docker-compose.prod.yml ps

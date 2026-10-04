@@ -1,3 +1,27 @@
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
+  DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  APP_ENV: production
+  DEBUG: "false"
+
+x-app: &app
+  image: ${APP_IMAGE:-ridedelivery:local}
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    <<: *app-environment
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - internal
+
 services:
   db:
     image: postgres:16-alpine
@@ -31,90 +55,22 @@ services:
       - internal
 
   api:
-    build: .
-    restart: unless-stopped
+    <<: *app
     command: ["/bin/sh", "/app/deploy/entrypoint.sh"]
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      APP_ENV: production
-      DEBUG: "false"
     ports:
       - "127.0.0.1:8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
 
   worker-rides:
-    build: .
-    restart: unless-stopped
+    <<: *app
     command: celery -A src.jobs.celery_app worker -Q rides -c 4 --loglevel=info
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      APP_ENV: production
-      DEBUG: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
 
   worker-notifications:
-    build: .
-    restart: unless-stopped
+    <<: *app
     command: celery -A src.jobs.celery_app worker -Q notifications -c 4 --loglevel=info
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      APP_ENV: production
-      DEBUG: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
 
   worker-payments:
-    build: .
-    restart: unless-stopped
+    <<: *app
     command: celery -A src.jobs.celery_app worker -Q payments -c 2 --loglevel=info
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-ridedelivery}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ridedelivery}
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      APP_ENV: production
-      DEBUG: "false"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
 
 volumes:
   pgdata:
