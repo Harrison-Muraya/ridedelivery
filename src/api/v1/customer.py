@@ -26,6 +26,7 @@ from src.schemas.user import UpdateProfileRequest, ProfileOut, LocationUpdate, R
 from src.services.distance import haversine_km, estimate_minutes
 from src.services.fare import calculate_fare
 from src.services.geo import validate_trip_coordinates
+from src.services.routing import road_route
 from src.services import mpesa as mpesa_service
 
 router = APIRouter(prefix="/customer", tags=["Customer"])
@@ -84,9 +85,14 @@ async def fare_estimate(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     r_type = RequestType(request_type)
-    # Straight-line distance (not road distance). Road km will usually be higher.
-    dist = haversine_km(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
-    breakdown = await calculate_fare(db, r_type, dist)
+    route = await road_route(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon)
+    breakdown = await calculate_fare(
+        db,
+        r_type,
+        route["distance_km"],
+        estimated_minutes=route["duration_minutes"],
+        distance_source=route["source"],
+    )
     return FareEstimateOut(
         distance_km=breakdown["distance_km"],
         estimated_minutes=breakdown["estimated_minutes"],
@@ -103,11 +109,19 @@ async def create_request(
     current_user: User = Depends(_require_customer),
     db: AsyncSession = Depends(get_db),
 ):
-    dist = haversine_km(
-        payload.pickup_latitude, payload.pickup_longitude,
-        payload.dropoff_latitude, payload.dropoff_longitude,
+    route = await road_route(
+        payload.pickup_latitude,
+        payload.pickup_longitude,
+        payload.dropoff_latitude,
+        payload.dropoff_longitude,
     )
-    breakdown = await calculate_fare(db, payload.request_type, dist)
+    breakdown = await calculate_fare(
+        db,
+        payload.request_type,
+        route["distance_km"],
+        estimated_minutes=route["duration_minutes"],
+        distance_source=route["source"],
+    )
 
     req = Request(
         customer_id=current_user.id,
@@ -123,7 +137,7 @@ async def create_request(
         package_description=payload.package_description,
         recipient_name=payload.recipient_name,
         recipient_phone=payload.recipient_phone,
-        distance_km=dist,
+        distance_km=route["distance_km"],
         estimated_minutes=breakdown["estimated_minutes"],
         estimated_fare=breakdown["total_amount"],
     )

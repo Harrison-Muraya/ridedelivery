@@ -31,6 +31,8 @@ async def calculate_fare(
     request_type: RequestType,
     distance_km: float,
     vehicle_type: str = "motorbike",
+    estimated_minutes: Optional[int] = None,
+    distance_source: str = "haversine",
 ) -> dict:
     """
     Returns a full fare breakdown dict.
@@ -52,11 +54,11 @@ async def calculate_fare(
         minimum = Decimal("100.00")
         surge = Decimal("1.0")
 
-    estimated_minutes = estimate_minutes(distance_km)
+    minutes = estimated_minutes if estimated_minutes is not None else estimate_minutes(distance_km)
     dist = Decimal(str(round(distance_km, 2)))
 
     distance_charge = per_km * dist
-    time_charge = per_min * Decimal(str(estimated_minutes))
+    time_charge = per_min * Decimal(str(minutes))
     subtotal = (base_fare + distance_charge) * surge
     # subtotal = (base_fare + distance_charge + time_charge) * surge
     total = max(subtotal, minimum)
@@ -69,6 +71,7 @@ async def calculate_fare(
         "surge_multiplier": float(surge),
         "discount": 0.0,
         "total_amount": float(total),
-        "estimated_minutes": estimated_minutes,
+        "estimated_minutes": minutes,
         "distance_km": float(dist),
+        "distance_source": distance_source,
     }

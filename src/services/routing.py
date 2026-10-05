@@ -66,7 +66,7 @@ async def _osrm_route(
             resp = await client.get(url)
             resp.raise_for_status()
             payload = resp.json()
-    except (httpx.HTTPError, ValueError) as exc:
+    except Exception as exc:  # network / parse / unexpected client errors
         logger.warning("OSRM request error: %s", exc)
         return None
 
