@@ -41,10 +41,12 @@ def dispatch_ride_search(self, request_id: str):
     from src.models.user import UserProfile, UserLocation, UserRoleMap
     from src.models.enums import UserRole
     from src.services.distance import haversine_km
+    from src.services.assignment_config import get_assignment_settings_sync
     from src.jobs.notification_tasks import send_rider_assignment_notification
 
     db = _get_sync_db()
     try:
+        assign_cfg = get_assignment_settings_sync(db)
         request = (
             db.query(Request)
             .options(selectinload(Request.assignments))
@@ -72,13 +74,13 @@ def dispatch_ride_search(self, request_id: str):
         ]
         attempt_number = len(request.assignments) + 1
 
-        if attempt_number > settings.MAX_ASSIGNMENT_ATTEMPTS:
-            _escalate_to_admin(db, request)
+        if attempt_number > assign_cfg.max_assignment_attempts:
+            _escalate_to_admin(db, request, assign_cfg.max_assignment_attempts)
             return
 
         radius_km = min(
-            settings.INITIAL_SEARCH_RADIUS_KM * attempt_number,
-            settings.MAX_SEARCH_RADIUS_KM,
+            assign_cfg.initial_search_radius_km * attempt_number,
+            assign_cfg.max_search_radius_km,
         )
 
         logger.info(
@@ -136,8 +138,8 @@ def dispatch_ride_search(self, request_id: str):
             request.request_status = RequestStatus.searching
             db.commit()
 
-            if attempt_number >= settings.MAX_ASSIGNMENT_ATTEMPTS:
-                _escalate_to_admin(db, request)
+            if attempt_number >= assign_cfg.max_assignment_attempts:
+                _escalate_to_admin(db, request, assign_cfg.max_assignment_attempts)
             else:
                 # Retry after a delay to give riders a chance to come online
                 self.apply_async(args=[request_id], countdown=60)
@@ -159,7 +161,7 @@ def dispatch_ride_search(self, request_id: str):
         # Schedule timeout task
         timeout_task = assignment_timeout_task.apply_async(
             args=[str(assignment.id)],
-            countdown=settings.RIDER_RESPONSE_TIMEOUT_SECONDS,
+            countdown=assign_cfg.rider_response_timeout_seconds,
         )
         assignment.timeout_task_id = timeout_task.id
         db.commit()
@@ -210,11 +212,15 @@ def assignment_timeout_task(assignment_id: str):
         db.close()
 
 
-def _escalate_to_admin(db, request):
+def _escalate_to_admin(db, request, max_attempts: int | None = None):
     from src.models.enums import RequestStatus, NotificationType
     from src.models.user import User, UserRoleMap
     from src.models.enums import UserRole
     from src.models.misc import Notification
+    from src.services.assignment_config import get_assignment_settings_sync
+
+    if max_attempts is None:
+        max_attempts = get_assignment_settings_sync(db).max_assignment_attempts
 
     request.request_status = RequestStatus.admin_escalated
     db.commit()
@@ -230,9 +236,9 @@ def _escalate_to_admin(db, request):
             user_id=admin.id,
             notification_type=NotificationType.request_escalated,
             title="Ride Request Escalated",
-            body=f"Request {request.id} could not be assigned after {settings.MAX_ASSIGNMENT_ATTEMPTS} attempts.",
+            body=f"Request {request.id} could not be assigned after {max_attempts} attempts.",
             data=str({"request_id": str(request.id)}),
         )
         db.add(notif)
     db.commit()
-    logger.warning("Request %s escalated to admin after %d attempts", request.id, settings.MAX_ASSIGNMENT_ATTEMPTS)
+    logger.warning("Request %s escalated to admin after %d attempts", request.id, max_attempts)

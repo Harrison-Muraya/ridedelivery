@@ -145,6 +145,7 @@ Add GitHub secrets `VPS_HOST`, `VPS_USER`, `VPS_PORT`, `VPS_SSH_KEY` so every gr
 | Method | Path | Description |
 |--------|------|-------------|
 | GET/POST | `/api/v1/admin/pricing` | View/update pricing per km |
+| GET/PUT | `/api/v1/admin/assignment-config` | View/update rider search timeout, radius, attempts |
 | POST | `/api/v1/admin/assign-rider` | Manually assign any rider to any job |
 | GET | `/api/v1/admin/escalated-requests` | Jobs no rider accepted |
 | GET | `/api/v1/admin/users` | List all users |

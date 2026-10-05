@@ -10,7 +10,7 @@ from src.models.user import User, UserProfile, UserLocation, UserRoleMap
 from src.models.requests import Request, RequestAssignment
 from src.models.enums import UserRole, AssignmentStatus, RequestStatus
 from src.services.distance import haversine_km
-from src.config import settings
+from src.services.assignment_config import get_assignment_settings
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +84,11 @@ async def get_next_rider_for_request(
     tried_ids = [a.rider_id for a in request.assignments]
     attempt_number = len(tried_ids) + 1
 
+    assign_cfg = await get_assignment_settings(db)
     # Expand search radius with each attempt
     radius_km = min(
-        settings.INITIAL_SEARCH_RADIUS_KM * attempt_number,
-        settings.MAX_SEARCH_RADIUS_KM,
+        assign_cfg.initial_search_radius_km * attempt_number,
+        assign_cfg.max_search_radius_km,
     )
 
     candidates = await find_nearest_available_riders(

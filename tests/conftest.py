@@ -51,6 +51,7 @@ from src.models import (  # noqa: F401 — register metadata
     Billing,
     FavoriteRider,
     Notification,
+    AssignmentConfig,
     PricingConfig,
     Rating,
     Request,

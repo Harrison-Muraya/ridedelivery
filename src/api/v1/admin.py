@@ -16,9 +16,19 @@ from src.models.billing import Billing
 from src.models.enums import (
     UserRole, RequestStatus, AssignmentStatus, NotificationType
 )
-from src.schemas.admin import UpdatePricingRequest, AdminAssignRiderRequest, PricingConfigOut
+from src.schemas.admin import (
+    UpdatePricingRequest,
+    AdminAssignRiderRequest,
+    PricingConfigOut,
+    UpdateAssignmentConfigRequest,
+    AssignmentConfigOut,
+)
 from src.schemas.requests import RequestOut, AssignmentOut
 from src.schemas.user import UserResponse
+from src.services.assignment_config import (
+    get_assignment_settings,
+    upsert_assignment_settings,
+)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -96,6 +106,68 @@ async def delete_pricing(
     )
     db.add(log)
     await db.flush()
+
+
+# ─── Assignment / rider-search settings ───────────────────────────────────────
+
+@router.get("/assignment-config", response_model=AssignmentConfigOut)
+async def get_assignment_config(
+    current_user: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rider-search settings used by dispatch.
+    Returns DB values when configured, otherwise env defaults
+    (timeout=300, max radius=10, initial radius=3, max attempts=5).
+    """
+    cfg = await get_assignment_settings(db)
+    return AssignmentConfigOut(
+        id=cfg.id,
+        rider_response_timeout_seconds=cfg.rider_response_timeout_seconds,
+        max_search_radius_km=cfg.max_search_radius_km,
+        initial_search_radius_km=cfg.initial_search_radius_km,
+        max_assignment_attempts=cfg.max_assignment_attempts,
+        source=cfg.source,
+    )
+
+
+@router.put("/assignment-config", response_model=AssignmentConfigOut)
+async def update_assignment_config(
+    payload: UpdateAssignmentConfigRequest,
+    current_user: User = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    if payload.initial_search_radius_km > payload.max_search_radius_km:
+        raise HTTPException(
+            status_code=400,
+            detail="initial_search_radius_km cannot be greater than max_search_radius_km",
+        )
+
+    row = await upsert_assignment_settings(
+        db,
+        rider_response_timeout_seconds=payload.rider_response_timeout_seconds,
+        max_search_radius_km=payload.max_search_radius_km,
+        initial_search_radius_km=payload.initial_search_radius_km,
+        max_assignment_attempts=payload.max_assignment_attempts,
+        updated_by=current_user.id,
+    )
+    log = SystemLog(
+        actor_id=current_user.id,
+        event_type="assignment_config_updated",
+        entity="AssignmentConfig",
+        entity_id=str(row.id),
+        detail=str(payload.model_dump()),
+    )
+    db.add(log)
+    await db.flush()
+    return AssignmentConfigOut(
+        id=row.id,
+        rider_response_timeout_seconds=row.rider_response_timeout_seconds,
+        max_search_radius_km=row.max_search_radius_km,
+        initial_search_radius_km=row.initial_search_radius_km,
+        max_assignment_attempts=row.max_assignment_attempts,
+        source="database",
+    )
 
 
 # ─── Requests (all status views) ─────────────────────────────────────────────

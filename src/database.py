@@ -41,7 +41,7 @@ async def init_db():
         User, UserRoleMap, UserProfile, UserLocation, FavoriteRider,
         Request, RequestAssignment,
         Billing, Transaction,
-        PricingConfig, Rating, Notification, SystemLog,
+        PricingConfig, AssignmentConfig, Rating, Notification, SystemLog,
     )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

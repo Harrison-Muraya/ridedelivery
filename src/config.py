@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     MPESA_CALLBACK_URL: str = "https://yourdomain.com/api/v1/payments/mpesa/callback"
     MPESA_ENV: str = "sandbox"
 
+    # Defaults only — admins override via /api/v1/admin/assignment-config
     RIDER_RESPONSE_TIMEOUT_SECONDS: int = 300
     MAX_SEARCH_RADIUS_KM: float = 10.0
     INITIAL_SEARCH_RADIUS_KM: float = 3.0

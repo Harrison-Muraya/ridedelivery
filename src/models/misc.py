@@ -31,6 +31,19 @@ class PricingConfig(Base, TimestampMixin, StatusFlagMixin):
     )
 
 
+class AssignmentConfig(Base, TimestampMixin, StatusFlagMixin):
+    """Admin-managed rider-search / assignment settings (single active row)."""
+    __tablename__ = "assignment_config"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rider_response_timeout_seconds = Column(Integer, nullable=False, default=300)
+    max_search_radius_km = Column(Float, nullable=False, default=10.0)
+    initial_search_radius_km = Column(Float, nullable=False, default=3.0)
+    max_assignment_attempts = Column(Integer, nullable=False, default=5)
+    is_active = Column(Boolean, default=True, nullable=False)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+
 class Rating(Base, TimestampMixin, StatusFlagMixin):
     """Bidirectional: customer rates rider AND rider rates customer."""
     __tablename__ = "ratings"
