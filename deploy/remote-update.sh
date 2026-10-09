@@ -11,13 +11,23 @@ echo "==> Updating code"
 git fetch --all --prune
 git reset --hard "origin/${DEPLOY_BRANCH:-main}"
 
+# Keep values passed by CD; .env must not replace a fresh image name or token.
+SAVED_APP_IMAGE="${APP_IMAGE:-}"
+SAVED_GHCR_TOKEN="${GHCR_TOKEN:-}"
+SAVED_GHCR_USER="${GHCR_USER:-}"
+
 # shellcheck disable=SC1091
 set -a
 source .env
 set +a
 
-APP_IMAGE="${APP_IMAGE:-ghcr.io/harrison-muraya/ridedelivery:latest}"
-export APP_IMAGE
+[[ -n "$SAVED_APP_IMAGE" ]] && APP_IMAGE="$SAVED_APP_IMAGE"
+[[ -n "$SAVED_GHCR_TOKEN" ]] && GHCR_TOKEN="$SAVED_GHCR_TOKEN"
+[[ -n "$SAVED_GHCR_USER" ]] && GHCR_USER="$SAVED_GHCR_USER"
+
+# Docker image refs must be lowercase.
+APP_IMAGE="$(printf '%s' "${APP_IMAGE:-ghcr.io/harrison-muraya/ridedelivery:latest}" | tr '[:upper:]' '[:lower:]')"
+export APP_IMAGE GHCR_TOKEN GHCR_USER
 
 if [[ -n "${GHCR_TOKEN:-}" ]]; then
   echo "==> Logging in to ghcr.io"
