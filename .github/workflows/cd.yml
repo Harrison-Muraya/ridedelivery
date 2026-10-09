@@ -94,11 +94,14 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/ridedelivery
-            chmod +x deploy/remote-update.sh deploy/entrypoint.sh deploy/deploy.sh
             export APP_IMAGE="${APP_IMAGE}"
             export GHCR_TOKEN="${GHCR_TOKEN}"
             export GHCR_USER="${GHCR_USER}"
             export DEPLOY_BRANCH="${DEPLOY_BRANCH}"
+            # Pull the script that belongs to this commit before executing it.
+            git fetch --all --prune
+            git reset --hard "origin/${DEPLOY_BRANCH}"
+            chmod +x deploy/remote-update.sh deploy/entrypoint.sh deploy/deploy.sh
             ./deploy/remote-update.sh
         env:
           APP_IMAGE: ${{ steps.image.outputs.name }}

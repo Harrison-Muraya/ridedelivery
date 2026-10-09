@@ -44,12 +44,20 @@ echo "==> Pruning old images"
 docker image prune -f >/dev/null || true
 
 echo "==> Health check"
-sleep 5
-curl -fsS http://127.0.0.1:8000/health || {
+ok=0
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:8000/health; then
+    echo
+    ok=1
+    break
+  fi
+  sleep 3
+done
+if [[ "$ok" -ne 1 ]]; then
   echo "Health check failed — recent api logs:"
   docker compose -f docker-compose.prod.yml logs --tail=80 api
   exit 1
-}
+fi
 
 echo "Deploy OK"
 docker compose -f docker-compose.prod.yml ps
