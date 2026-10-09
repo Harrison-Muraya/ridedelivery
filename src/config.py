@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     MPESA_CONSUMER_SECRET: str = ""
     MPESA_SHORTCODE: str = "174379"
     MPESA_PASSKEY: str = ""
-    MPESA_CALLBACK_URL: str = "https://yourdomain.com/api/v1/payments/mpesa/callback"
+    MPESA_CALLBACK_URL: str = "https://197.248.201.233:1516/api/v1/payments/mpesa/callback"
     MPESA_ENV: str = "sandbox"
 
     # Defaults only — admins override via /api/v1/admin/assignment-config
