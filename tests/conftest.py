@@ -48,10 +48,10 @@ from sqlalchemy.pool import NullPool
 from src.database import Base, get_db
 from src.main import app
 from src.models import (  # noqa: F401 — register metadata
+    AssignmentConfig,
     Billing,
     FavoriteRider,
     Notification,
-    AssignmentConfig,
     PricingConfig,
     Rating,
     Request,

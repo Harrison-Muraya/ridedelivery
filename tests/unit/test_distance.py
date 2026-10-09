@@ -1,5 +1,4 @@
 import pytest
-
 from src.services.distance import estimate_minutes, haversine_km
 from src.services.geo import validate_kenya_coordinates, validate_trip_coordinates
 

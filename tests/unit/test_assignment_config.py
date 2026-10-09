@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
 from src.services.assignment_config import (
     AssignmentSettings,
     get_assignment_settings,
